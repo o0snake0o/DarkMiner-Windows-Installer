@@ -1,0 +1,93 @@
+- name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          DARKMINER_LICENSE_URL: ${{ vars.DARKMINER_LICENSE_URL }}
+        run: ./build-win.ps1
+name: Build DarkMiner Windows Installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Verify licensing class
+        shell: pwsh
+        run: |
+          @'
+          import ast
+          from pathlib import Path
+
+          tree = ast.parse(
+              Path("licensing_ui.py").read_text()
+          )
+
+          cls = next(
+              n for n in tree.body
+              if isinstance(n, ast.ClassDef)
+              and n.name == "LicensedMinerMixin"
+          )
+
+          found = {
+              n.name for n in cls.body
+              if isinstance(n, ast.FunctionDef)
+          }
+
+          required = {
+              "__init__",
+              "open_account",
+              "api_request",
+              "check_license",
+              "running_miner",
+              "background_license_check",
+              "start_mining",
+              "logout",
+              "set_controls"
+          }
+
+          missing = required - found
+          print("Methods found:", sorted(found))
+
+          if missing:
+              raise SystemExit(
+                  f"Missing licensing methods: {sorted(missing)}"
+              )
+
+          print("Licensing class verification passed")
+          '@ | python -
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          DARKMINER_LICENSE_URL: ${{ vars.DARKMINER_LICENSE_URL }}
+        run: ./build-win.ps1
+
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkMiner-Windows-Installer
+          path: output/DarkMiner-Setup-*.exe
+          if-no-files-found: error
